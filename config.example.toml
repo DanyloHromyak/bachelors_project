@@ -1,0 +1,18 @@
+[demo_code]
+# backend: "openai" (requires OPENAI_API_KEY) or "litellm"
+backend = "litellm"
+
+# Input CSV with columns: Text1, Text2, Class
+csv = "train.csv"
+
+# Model name (for litellm you can also use provider prefix, e.g. "openai/gpt-4o")
+model = "gpt-4o"
+
+# A logical name for the prompt (used in filenames/metadata)
+prompt_name = "roses_v1"
+
+# Where predictions will be stored (JSONL + prompts)
+pred_dir = "predictions"
+
+# How many rows from the start of the CSV to process
+limit = 10
