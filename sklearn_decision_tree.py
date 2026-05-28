@@ -39,8 +39,14 @@ def main() -> None:
     parser.add_argument(
         "--max-depth",
         type=int,
-        default=6,
-        help="Decision Tree max_depth (default: 6)",
+        default=20,
+        help="Decision Tree max_depth (default: 20)",
+    )
+    parser.add_argument(
+        "--min-samples-split",
+        type=int,
+        default=5,
+        help="Decision Tree min_samples_split (default: 5)",
     )
     parser.add_argument(
         "--max-rows",
@@ -65,7 +71,11 @@ def main() -> None:
             ("tfidf", TfidfVectorizer()),
             (
                 "clf",
-                DecisionTreeClassifier(random_state=42, max_depth=args.max_depth),
+                DecisionTreeClassifier(
+                    random_state=42,
+                    max_depth=args.max_depth,
+                    min_samples_split=args.min_samples_split,
+                ),
             ),
         ]
     )
