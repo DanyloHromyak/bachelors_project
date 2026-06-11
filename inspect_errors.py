@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -33,6 +34,29 @@ def _normalize_label(value: object) -> str:
         return "Duplicate"
     if first == "neutral":
         return "Neutral"
+
+    matches = re.findall(r"(?<![a-z])(conflict|duplicate|neutral)(?![a-z])", lowered)
+    if matches:
+        last = matches[-1]
+        if last == "conflict":
+            return "Conflict"
+        if last == "duplicate":
+            return "Duplicate"
+        if last == "neutral":
+            return "Neutral"
+
+    last_idx: tuple[int, str] | None = None
+    for lab in ("conflict", "duplicate", "neutral"):
+        idx = lowered.rfind(lab)
+        if idx >= 0 and (last_idx is None or idx > last_idx[0]):
+            last_idx = (idx, lab)
+    if last_idx is not None:
+        if last_idx[1] == "conflict":
+            return "Conflict"
+        if last_idx[1] == "duplicate":
+            return "Duplicate"
+        if last_idx[1] == "neutral":
+            return "Neutral"
 
     return "Invalid"
 

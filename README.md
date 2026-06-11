@@ -164,7 +164,7 @@ python evaluate_predictions.py --pred "predictions/val.csv__sklearn__decision_tr
 python evaluate_predictions.py --pred "predictions/test.csv__sklearn__decision_tree.jsonl"
 ```
 
-## 4) Inspect mistakes (join back to CSV)
+## ) Inspect mistakes (join back to CSV)
 
 Because prediction JSONL files store `row_index` (not `Text1`/`Text2`), you can reconstruct the texts from the CSV when you want to inspect misclassifications.
 

@@ -39,14 +39,38 @@ def main() -> None:
     parser.add_argument(
         "--max-depth",
         type=int,
-        default=20,
-        help="Decision Tree max_depth (default: 20)",
+        default=100,
+        help="Decision Tree max_depth 100",
     )
     parser.add_argument(
         "--min-samples-split",
         type=int,
-        default=5,
-        help="Decision Tree min_samples_split (default: 5)",
+        default=15,
+        help="Decision Tree min_samples_split (default: 15)",
+    )
+    parser.add_argument(
+        "--min-samples-leaf",
+        type=int,
+        default=1,
+        help="Decision Tree min_samples_leaf (default: 1)",
+    )
+    parser.add_argument(
+        "--min-weight-fraction-leaf",
+        type=float,
+        default=0.0,
+        help="Decision Tree min_weight_fraction_leaf (default: 0.0)",
+    )
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="Decision Tree random_state (default: 42)",
+    )
+    parser.add_argument(
+        "--max-leaf-nodes",
+        type=int,
+        default=None,
+        help="Decision Tree max_leaf_nodes (default: None). Use 0 to mean None/unlimited.",
     )
     parser.add_argument(
         "--max-rows",
@@ -66,15 +90,22 @@ def main() -> None:
     x_train = _make_text(train_df)
     y_train = train_df["Class"].fillna("").astype(str)
 
+    max_leaf_nodes = args.max_leaf_nodes
+    if max_leaf_nodes is not None and max_leaf_nodes <= 0:
+        max_leaf_nodes = None
+
     model = Pipeline(
         steps=[
             ("tfidf", TfidfVectorizer()),
             (
                 "clf",
                 DecisionTreeClassifier(
-                    random_state=42,
+                    random_state=args.random_state,
                     max_depth=args.max_depth,
                     min_samples_split=args.min_samples_split,
+                    min_samples_leaf=args.min_samples_leaf,
+                    min_weight_fraction_leaf=args.min_weight_fraction_leaf,
+                    max_leaf_nodes=max_leaf_nodes,
                 ),
             ),
         ]

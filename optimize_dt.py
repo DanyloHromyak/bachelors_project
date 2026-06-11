@@ -27,12 +27,23 @@ def _clip(x: np.ndarray, bounds: Bounds) -> np.ndarray:
     return np.minimum(np.maximum(x, bounds.low), bounds.high)
 
 
-def _decode_solution(position: np.ndarray, bounds: Bounds) -> tuple[int, int]:
-    """Map continuous PSO position to discrete Decision Tree hyperparameters."""
+def _decode_solution(
+    position: np.ndarray,
+    bounds: Bounds,
+) -> tuple[int, int, int, float, int, int | None]:
+    """Map continuous PSO position to Decision Tree hyperparameters.
+
+    Integer parameters are rounded to nearest int. max_leaf_nodes uses sentinel:
+    values <= 0 are treated as None (unlimited).
+    """
     clipped = _clip(position, bounds)
 
     max_depth = int(np.rint(clipped[0]))
     min_samples_split = int(np.rint(clipped[1]))
+    min_samples_leaf = int(np.rint(clipped[2]))
+    min_weight_fraction_leaf = float(clipped[3])
+    random_state = int(np.rint(clipped[4]))
+    max_leaf_nodes_raw = int(np.rint(clipped[5]))
 
     # Safety clamp (should already be within bounds).
     max_depth = max(int(bounds.low[0]), min(max_depth, int(bounds.high[0])))
@@ -40,7 +51,27 @@ def _decode_solution(position: np.ndarray, bounds: Bounds) -> tuple[int, int]:
         int(bounds.low[1]), min(min_samples_split, int(bounds.high[1]))
     )
 
-    return max_depth, min_samples_split
+    min_samples_leaf = max(
+        int(bounds.low[2]), min(min_samples_leaf, int(bounds.high[2]))
+    )
+    min_weight_fraction_leaf = max(
+        float(bounds.low[3]), min(min_weight_fraction_leaf, float(bounds.high[3]))
+    )
+    random_state = max(int(bounds.low[4]), min(random_state, int(bounds.high[4])))
+    max_leaf_nodes_raw = max(
+        int(bounds.low[5]), min(max_leaf_nodes_raw, int(bounds.high[5]))
+    )
+
+    max_leaf_nodes = None if max_leaf_nodes_raw <= 0 else max_leaf_nodes_raw
+
+    return (
+        max_depth,
+        min_samples_split,
+        min_samples_leaf,
+        min_weight_fraction_leaf,
+        random_state,
+        max_leaf_nodes,
+    )
 
 
 def main() -> None:
@@ -61,7 +92,7 @@ def main() -> None:
         "--max-depth-min", type=int, default=3, help="Min max_depth (default: 3)"
     )
     parser.add_argument(
-        "--max-depth-max", type=int, default=20, help="Max max_depth (default: 20)"
+        "--max-depth-max", type=int, default=200, help="Max max_depth (default: 200)"
     )
     parser.add_argument(
         "--min-split-min",
@@ -74,6 +105,55 @@ def main() -> None:
         type=int,
         default=15,
         help="Max min_samples_split (default: 15)",
+    )
+
+    parser.add_argument(
+        "--min-leaf-min",
+        type=int,
+        default=1,
+        help="Min min_samples_leaf (default: 1)",
+    )
+    parser.add_argument(
+        "--min-leaf-max",
+        type=int,
+        default=30,
+        help="Max min_samples_leaf (default: 30)",
+    )
+    parser.add_argument(
+        "--min-weight-frac-min",
+        type=float,
+        default=0.0,
+        help="Min min_weight_fraction_leaf (default: 0.0)",
+    )
+    parser.add_argument(
+        "--min-weight-frac-max",
+        type=float,
+        default=0.1,
+        help="Max min_weight_fraction_leaf (default: 0.1)",
+    )
+    parser.add_argument(
+        "--random-state-min",
+        type=int,
+        default=0,
+        help="Min random_state (default: 0)",
+    )
+    parser.add_argument(
+        "--random-state-max",
+        type=int,
+        default=9999,
+        help="Max random_state (default: 9999)",
+    )
+    parser.add_argument(
+        "--max-leaf-nodes-min",
+        type=int,
+        default=0,
+        help="Min max_leaf_nodes (default: 0; 0 means None/unlimited)",
+    )
+    parser.add_argument(
+        "--max-leaf-nodes-max",
+        type=int,
+        default=500,
+        help="Max max_leaf_nodes (default: 500)",
     )
 
     # PSO settings
@@ -96,6 +176,16 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    print(
+        "Search space: "
+        f"max_depth=[{args.max_depth_min}, {args.max_depth_max}], "
+        f"min_samples_split=[{args.min_split_min}, {args.min_split_max}], "
+        f"min_samples_leaf=[{args.min_leaf_min}, {args.min_leaf_max}], "
+        f"min_weight_fraction_leaf=[{args.min_weight_frac_min}, {args.min_weight_frac_max}], "
+        f"random_state=[{args.random_state_min}, {args.random_state_max}], "
+        f"max_leaf_nodes=[{args.max_leaf_nodes_min}, {args.max_leaf_nodes_max}] (0=>None)"
+    )
+
     train_path = Path(args.train)
     val_path = Path(args.val)
     if not train_path.exists():
@@ -107,6 +197,14 @@ def main() -> None:
         raise SystemExit("Invalid bounds: max-depth-min > max-depth-max")
     if args.min_split_min > args.min_split_max:
         raise SystemExit("Invalid bounds: min-split-min > min-split-max")
+    if args.min_leaf_min > args.min_leaf_max:
+        raise SystemExit("Invalid bounds: min-leaf-min > min-leaf-max")
+    if args.min_weight_frac_min > args.min_weight_frac_max:
+        raise SystemExit("Invalid bounds: min-weight-frac-min > min-weight-frac-max")
+    if args.random_state_min > args.random_state_max:
+        raise SystemExit("Invalid bounds: random-state-min > random-state-max")
+    if args.max_leaf_nodes_min > args.max_leaf_nodes_max:
+        raise SystemExit("Invalid bounds: max-leaf-nodes-min > max-leaf-nodes-max")
 
     rng = np.random.default_rng(args.seed)
 
@@ -130,18 +228,48 @@ def main() -> None:
     x_val = vectorizer.transform(x_val_text)
 
     bounds = Bounds(
-        low=np.array([args.max_depth_min, args.min_split_min], dtype=float),
-        high=np.array([args.max_depth_max, args.min_split_max], dtype=float),
+        low=np.array(
+            [
+                args.max_depth_min,
+                args.min_split_min,
+                args.min_leaf_min,
+                args.min_weight_frac_min,
+                args.random_state_min,
+                args.max_leaf_nodes_min,
+            ],
+            dtype=float,
+        ),
+        high=np.array(
+            [
+                args.max_depth_max,
+                args.min_split_max,
+                args.min_leaf_max,
+                args.min_weight_frac_max,
+                args.random_state_max,
+                args.max_leaf_nodes_max,
+            ],
+            dtype=float,
+        ),
     )
 
     def fitness(position: np.ndarray) -> float:
         """PSO minimizes: return 1 - macroF1."""
-        max_depth, min_samples_split = _decode_solution(position, bounds)
+        (
+            max_depth,
+            min_samples_split,
+            min_samples_leaf,
+            min_weight_fraction_leaf,
+            random_state,
+            max_leaf_nodes,
+        ) = _decode_solution(position, bounds)
 
         clf = DecisionTreeClassifier(
-            random_state=args.seed,
+            random_state=random_state,
             max_depth=max_depth,
             min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            min_weight_fraction_leaf=min_weight_fraction_leaf,
+            max_leaf_nodes=max_leaf_nodes,
         )
         clf.fit(x_train, y_train)
         pred = clf.predict(x_val)
@@ -152,7 +280,7 @@ def main() -> None:
     # --- PSO (global best) ---
     n_particles = int(args.particles)
     n_iters = int(args.iters)
-    dim = 2
+    dim = int(bounds.low.shape[0])
 
     # Initialize swarm positions uniformly in bounds
     pos = rng.uniform(bounds.low, bounds.high, size=(n_particles, dim))
@@ -187,11 +315,20 @@ def main() -> None:
             gbest_cost = float(pbest_cost[best_idx])
             gbest_pos = pbest_pos[best_idx].copy()
 
-        best_max_depth, best_min_split = _decode_solution(gbest_pos, bounds)
+        (
+            best_max_depth,
+            best_min_split,
+            best_min_leaf,
+            best_min_weight_frac,
+            best_random_state,
+            best_max_leaf_nodes,
+        ) = _decode_solution(gbest_pos, bounds)
         best_f1 = 1.0 - gbest_cost
         print(
             f"iter {it + 1:02d}/{n_iters}: best macro-F1={best_f1:.4f} "
-            f"(max_depth={best_max_depth}, min_samples_split={best_min_split})"
+            f"(max_depth={best_max_depth}, min_samples_split={best_min_split}, "
+            f"min_samples_leaf={best_min_leaf}, min_weight_fraction_leaf={best_min_weight_frac:.4f}, "
+            f"random_state={best_random_state}, max_leaf_nodes={best_max_leaf_nodes})"
         )
 
         # Velocity and position update
@@ -206,12 +343,23 @@ def main() -> None:
         # Keep positions within bounds
         pos = _clip(pos, bounds)
 
-    best_max_depth, best_min_split = _decode_solution(gbest_pos, bounds)
+    (
+        best_max_depth,
+        best_min_split,
+        best_min_leaf,
+        best_min_weight_frac,
+        best_random_state,
+        best_max_leaf_nodes,
+    ) = _decode_solution(gbest_pos, bounds)
     best_macro_f1 = 1.0 - gbest_cost
 
     print("\n=== Best solution ===")
     print(f"max_depth: {best_max_depth}")
     print(f"min_samples_split: {best_min_split}")
+    print(f"min_samples_leaf: {best_min_leaf}")
+    print(f"min_weight_fraction_leaf: {best_min_weight_frac:.6f}")
+    print(f"random_state: {best_random_state}")
+    print(f"max_leaf_nodes: {best_max_leaf_nodes}")
     print(f"best macro-F1: {best_macro_f1:.4f}")
 
 
